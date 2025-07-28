@@ -21,6 +21,10 @@ features:
     title: Daily Reports
     details: View token usage and costs aggregated by date with detailed breakdowns
     link: /guide/daily-reports
+  - icon: 🏗️
+    title: Architecture
+    details: Deep dive into the technical architecture and design patterns
+    link: /architecture
   - icon: 📅
     title: Monthly Reports
     details: Analyze usage patterns over monthly periods with cost tracking
@@ -54,6 +58,14 @@ features:
   - icon: 🔌
     title: MCP Integration
     details: Built-in Model Context Protocol server for tool integration
+  - icon: 🎨
+    title: Design Philosophy
+    details: Learn about our design principles and user experience approach
+    link: /design
+  - icon: 🗺️
+    title: Project Roadmap
+    details: See what's coming next and contribute to our future vision
+    link: /roadmap
 ---
 
 <div style="text-align: center; margin: 2rem 0;">

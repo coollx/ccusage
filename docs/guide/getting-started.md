@@ -129,3 +129,12 @@ ccusage daily
 - Use `ccusage --help` for command options
 - Visit our [GitHub repository](https://github.com/ryoppippi/ccusage) for issues
 - Check the [API Reference](/api/) for programmatic usage
+
+## Next Steps
+
+Now that you're up and running, explore more about ccusage:
+
+- Learn about the @[/architecture] - Understand how ccusage works under the hood
+- Review our @[/design] philosophy - See why we made certain design choices
+- Check the @[/roadmap] - Discover upcoming features and contribute ideas
+- Browse @[/AD_HOC_TASKS] - See what we're currently working on

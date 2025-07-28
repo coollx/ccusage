@@ -1,0 +1,162 @@
+{
+	"indexes": [
+		{
+			"collectionGroup": "usage",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "date",
+					"order": "DESCENDING"
+				},
+				{
+					"fieldPath": "deviceName",
+					"order": "ASCENDING"
+				}
+			]
+		},
+		{
+			"collectionGroup": "usage",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "deviceName",
+					"order": "ASCENDING"
+				},
+				{
+					"fieldPath": "date",
+					"order": "DESCENDING"
+				}
+			]
+		},
+		{
+			"collectionGroup": "usage",
+			"queryScope": "COLLECTION_GROUP",
+			"fields": [
+				{
+					"fieldPath": "date",
+					"order": "DESCENDING"
+				},
+				{
+					"fieldPath": "totalCost",
+					"order": "DESCENDING"
+				}
+			]
+		},
+		{
+			"collectionGroup": "usage_sessions",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "projectId",
+					"order": "ASCENDING"
+				},
+				{
+					"fieldPath": "sessionId",
+					"order": "ASCENDING"
+				}
+			]
+		},
+		{
+			"collectionGroup": "devices",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "createdAt",
+					"order": "ASCENDING"
+				}
+			]
+		},
+		{
+			"collectionGroup": "devices",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "platform",
+					"order": "ASCENDING"
+				},
+				{
+					"fieldPath": "deviceName",
+					"order": "ASCENDING"
+				}
+			]
+		},
+		{
+			"collectionGroup": "sync_checkpoints",
+			"queryScope": "COLLECTION",
+			"fields": [
+				{
+					"fieldPath": "deviceId",
+					"order": "ASCENDING"
+				},
+				{
+					"fieldPath": "lastSyncTimestamp",
+					"order": "DESCENDING"
+				}
+			]
+		}
+	],
+	"fieldOverrides": [
+		{
+			"collectionGroup": "usage",
+			"fieldPath": "date",
+			"indexes": [
+				{
+					"order": "ASCENDING",
+					"queryScope": "COLLECTION"
+				},
+				{
+					"order": "DESCENDING",
+					"queryScope": "COLLECTION"
+				},
+				{
+					"arrayConfig": "CONTAINS",
+					"queryScope": "COLLECTION"
+				},
+				{
+					"order": "ASCENDING",
+					"queryScope": "COLLECTION_GROUP"
+				},
+				{
+					"order": "DESCENDING",
+					"queryScope": "COLLECTION_GROUP"
+				}
+			]
+		},
+		{
+			"collectionGroup": "usage",
+			"fieldPath": "totalCost",
+			"indexes": [
+				{
+					"order": "ASCENDING",
+					"queryScope": "COLLECTION"
+				},
+				{
+					"order": "DESCENDING",
+					"queryScope": "COLLECTION"
+				},
+				{
+					"order": "ASCENDING",
+					"queryScope": "COLLECTION_GROUP"
+				},
+				{
+					"order": "DESCENDING",
+					"queryScope": "COLLECTION_GROUP"
+				}
+			]
+		},
+		{
+			"collectionGroup": "usage",
+			"fieldPath": "totalTokens",
+			"indexes": [
+				{
+					"order": "ASCENDING",
+					"queryScope": "COLLECTION"
+				},
+				{
+					"order": "DESCENDING",
+					"queryScope": "COLLECTION"
+				}
+			]
+		}
+	]
+}

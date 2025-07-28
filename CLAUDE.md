@@ -2,6 +2,22 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 📚 Documentation Navigation
+
+- **Main Documentation**: `/docs/` - VitePress documentation site
+- **Architecture**: @[docs/architecture.md] - Technical architecture deep dive
+- **Design Philosophy**: @[docs/design.md] - Design principles and user experience
+- **Roadmap**: @[docs/roadmap.md] - Project planning and future features
+- **Task Tracking**: @[docs/AD_HOC_TASKS.md] - Lightweight development tasks
+- **Cloud Sync Design**: @[docs/tasks/001-cloud-sync-feature.md] - Real-time multi-device sync
+
+## 📖 Quick Links
+
+- [Getting Started](docs/guide/getting-started.md)
+- [Daily Reports Guide](docs/guide/daily-reports.md)
+- [MCP Server Integration](docs/guide/mcp-server.md)
+- [API Reference](docs/api.md)
+
 ## Development Commands
 
 **Testing and Quality:**
@@ -10,6 +26,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Lint code using ESLint MCP server (available via Claude Code tools)
 - `bun run format` - Format code with ESLint (writes changes)
 - `bun typecheck` - Type check with TypeScript
+- **Linting Tip**: formatting errors can be fixed with "eslint --fix"
 
 **Build and Release:**
 
@@ -61,6 +78,8 @@ This addresses the breaking change in Claude Code where logs moved from `~/.clau
 
 ## Architecture Overview
 
+> 📐 For a detailed technical deep dive, see @[docs/architecture.md]
+
 This is a CLI tool that analyzes Claude Code usage data from local JSONL files stored in Claude data directories (supports both `~/.claude/projects/` and `~/.config/claude/projects/`). The architecture follows a clear separation of concerns:
 
 **Core Data Flow:**
@@ -89,6 +108,8 @@ This is a CLI tool that analyzes Claude Code usage data from local JSONL files s
 - **LiteLLM Integration**: Cost calculations depend on LiteLLM's pricing database for model pricing data
 
 **MCP Integration:**
+
+> 🔌 See @[docs/guide/mcp-server.md] for detailed MCP server configuration
 
 - **Built-in MCP Server**: Exposes usage data through MCP protocol with tools:
   - `daily` - Daily usage reports
@@ -191,11 +212,25 @@ This ensures code quality and catches issues immediately after changes.
 - Future model updates require checking LiteLLM compatibility first
 - The application cannot calculate costs for models not supported by LiteLLM
 
+## 🎯 Project Overview
+
+**ccusage** is a comprehensive CLI tool for analyzing Claude Code usage and costs. It provides:
+
+- **Usage Analytics**: Daily, monthly, session, and billing block reports
+- **Cost Tracking**: Accurate cost calculations using LiteLLM pricing data
+- **MCP Integration**: Expose usage data through Model Context Protocol
+- **Multiple Output Formats**: Table view for terminals, JSON for automation
+- **Cross-Platform Support**: Works with multiple Claude data directories
+
+For installation and getting started, see @[docs/guide/getting-started.md]
+
 # Tips for Claude Code
 
 - [gunshi](https://gunshi.dev/llms.txt) - Documentation available via Gunshi MCP server
 - Context7 MCP server available for library documentation lookup
 - do not use console.log. use logger.ts instead
+- Check @[docs/AD_HOC_TASKS.md] for current development tasks
+- Refer to @[docs/roadmap.md] for upcoming features
 
 # important-instruction-reminders
 

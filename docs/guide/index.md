@@ -105,3 +105,10 @@ Thanks to [@milliondev](https://note.com/milliondev) for the [original concept a
 ## Getting Started
 
 Ready to analyze your Claude Code usage? Check out our [Getting Started Guide](/guide/getting-started) to begin exploring your data!
+
+## Learn More
+
+- 🏗️ [Architecture](/architecture) - Technical deep dive into how ccusage works
+- 🎨 [Design Philosophy](/design) - Our approach to user experience and design
+- 🗺️ [Roadmap](/roadmap) - See what's coming next and contribute ideas
+- 📝 [Development Tasks](/AD_HOC_TASKS) - Current development priorities

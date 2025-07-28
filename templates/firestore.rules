@@ -1,0 +1,108 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Only authenticated users can access any data
+    // This ensures anonymous auth is required at minimum
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    // User data isolation - each user can only access their own data
+    match /users/{userId} {
+      // User can read/write their own user document
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // Device collection - user owns all their devices
+      match /devices/{deviceName} {
+        // Enforce device name uniqueness on write
+        allow create: if request.auth != null 
+          && request.auth.uid == userId
+          && request.resource.data.deviceName == deviceName
+          && request.resource.data.deviceId is string
+          && request.resource.data.platform is string
+          && request.resource.data.createdAt is timestamp;
+        
+        // Only allow updates from the same device (using deviceId)
+        allow update: if request.auth != null 
+          && request.auth.uid == userId
+          && request.resource.data.deviceId == resource.data.deviceId;
+        
+        // User can read and delete their own devices
+        allow read, delete: if request.auth != null && request.auth.uid == userId;
+        
+        // Usage subcollection - device-isolated writes
+        match /usage/{date} {
+          // Validate date format (YYYY-MM-DD)
+          allow write: if request.auth != null
+            && request.auth.uid == userId
+            && date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && request.resource.data.date == date
+            && request.resource.data.deviceName == deviceName
+            && request.resource.data.totalCost is number
+            && request.resource.data.totalTokens is number
+            && request.resource.data.lastUpdated is timestamp;
+          
+          // User can read usage data from all their devices
+          allow read: if request.auth != null && request.auth.uid == userId;
+        }
+      }
+      
+      // Aggregated usage data - system computed, user readable
+      match /usage_aggregated/{date} {
+        // Only cloud functions can write aggregated data (future enhancement)
+        // For now, clients compute aggregation on read
+        allow write: if false;
+        
+        // User can read their aggregated data
+        allow read: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Session usage data
+      match /usage_sessions/{sessionKey} {
+        // Session key format: projectId_sessionId
+        allow write: if request.auth != null
+          && request.auth.uid == userId
+          && sessionKey.matches('^[a-zA-Z0-9_-]+_[a-zA-Z0-9_-]+$')
+          && request.resource.data.projectId is string
+          && request.resource.data.sessionId is string;
+        
+        // User can read all their session data
+        allow read: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Sync checkpoints - track sync progress per device
+      match /sync_checkpoints/{deviceId} {
+        // Only the device itself can update its checkpoint
+        allow write: if request.auth != null
+          && request.auth.uid == userId
+          && request.resource.data.deviceId == deviceId
+          && request.resource.data.lastProcessedFile is string
+          && request.resource.data.lastSyncTimestamp is timestamp;
+        
+        // User can read all sync checkpoints
+        allow read: if request.auth != null && request.auth.uid == userId;
+      }
+    }
+  }
+}
+
+// Realtime Database Rules (if enabled)
+// These rules go in a separate file: database.rules.json
+// {
+//   "rules": {
+//     "users": {
+//       "$uid": {
+//         ".read": "$uid === auth.uid",
+//         ".write": "$uid === auth.uid",
+//         "activeBlocks": {
+//           "$blockId": {
+//             ".validate": "newData.hasChildren(['startTime', 'endTime', 'devices'])"
+//           }
+//         },
+//         "liveMetrics": {
+//           ".validate": "newData.hasChildren(['currentRate', 'lastUpdate'])"
+//         }
+//       }
+//     }
+//   }
+// }

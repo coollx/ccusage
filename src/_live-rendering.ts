@@ -49,6 +49,7 @@ export type LiveMonitoringConfig = {
 	sessionDurationHours: number;
 	mode: CostMode;
 	order: SortOrder;
+	syncIndicator?: () => void;
 };
 
 /**
@@ -189,7 +190,12 @@ export function renderLiveDisplay(terminal: TerminalManager, block: SessionBlock
 
 	// Draw header
 	terminal.write(`${marginStr}┌${'─'.repeat(boxWidth - 2)}┐\n`);
-	terminal.write(`${marginStr}│${pc.bold(centerText('CLAUDE CODE - LIVE TOKEN USAGE MONITOR', boxWidth - 2))}│\n`);
+	let headerText = 'CLAUDE CODE - LIVE TOKEN USAGE MONITOR';
+	if (config.syncIndicator != null) {
+		config.syncIndicator();
+		headerText += ' ↑';
+	}
+	terminal.write(`${marginStr}│${pc.bold(centerText(headerText, boxWidth - 2))}│\n`);
 	terminal.write(`${marginStr}├${'─'.repeat(boxWidth - 2)}┤\n`);
 	terminal.write(`${marginStr}│${' '.repeat(boxWidth - 2)}│\n`);
 
