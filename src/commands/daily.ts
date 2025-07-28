@@ -10,6 +10,7 @@ import {
 	createTotalsObject,
 	getTotalTokens,
 } from '../calculate-cost.ts';
+import { determineDataSource, formatDataSource } from '../cloud-sync/cloud-indicator.ts';
 import { getCommandExecutor } from '../cloud-sync/command-executor.ts';
 import { formatDateCompact, loadDailyUsageData } from '../data-loader.ts';
 import { detectMismatches, printMismatchReport } from '../debug.ts';
@@ -32,6 +33,16 @@ export const dailyCommand = define({
 			short: 'p',
 			description: 'Filter to specific project name',
 		},
+		cloud: {
+			type: 'boolean',
+			description: 'Show aggregated data from all devices (cloud sync)',
+			default: false,
+		},
+		local: {
+			type: 'boolean',
+			description: 'Force local-only mode (no cloud data)',
+			default: false,
+		},
 	},
 	async run(ctx) {
 		const executor = getCommandExecutor();
@@ -41,15 +52,37 @@ export const dailyCommand = define({
 				logger.level = 0;
 			}
 
-			const dailyData = await loadDailyUsageData({
-				since: ctx.values.since,
-				until: ctx.values.until,
-				mode: ctx.values.mode,
-				order: ctx.values.order,
-				offline: ctx.values.offline,
-				groupByProject: ctx.values.instances,
-				project: ctx.values.project,
-			});
+			// Determine data source based on flags
+			const dataSource = determineDataSource({ cloud: ctx.values.cloud, local: ctx.values.local });
+			let dailyData;
+			const deviceBreakdown: Record<string, Record<string, { cost: number; tokens: number }>> = {};
+
+			if (dataSource === 'cloud' && !ctx.values.local) {
+				// TODO: Load cloud data when cloud sync is available
+				// For now, fall back to local data
+				logger.warn('Cloud sync not yet fully implemented, showing local data');
+				dailyData = await loadDailyUsageData({
+					since: ctx.values.since,
+					until: ctx.values.until,
+					mode: ctx.values.mode,
+					order: ctx.values.order,
+					offline: ctx.values.offline,
+					groupByProject: ctx.values.instances,
+					project: ctx.values.project,
+				});
+			}
+			else {
+				// Load local data
+				dailyData = await loadDailyUsageData({
+					since: ctx.values.since,
+					until: ctx.values.until,
+					mode: ctx.values.mode,
+					order: ctx.values.order,
+					offline: ctx.values.offline,
+					groupByProject: ctx.values.instances,
+					project: ctx.values.project,
+				});
+			}
 
 			if (dailyData.length === 0) {
 				if (ctx.values.json) {
@@ -95,8 +128,9 @@ export const dailyCommand = define({
 				log(JSON.stringify(jsonOutput, null, 2));
 			}
 			else {
-			// Print header
-				logger.box('Claude Code Token Usage Report - Daily');
+			// Print header with data source indicator
+				const headerText = `Claude Code Token Usage Report - Daily ${formatDataSource(dataSource)}`;
+				logger.box(headerText);
 
 				// Create table with compact mode support
 				const table = new ResponsiveTable({

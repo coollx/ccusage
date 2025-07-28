@@ -1,0 +1,87 @@
+{
+	"rules": {
+		".read": false,
+		".write": false,
+
+		"users": {
+			"$uid": {
+				".read": "$uid === auth.uid",
+				".write": "$uid === auth.uid",
+
+				"activeBlocks": {
+					"$blockId": {
+						".validate": "newData.hasChildren(['startTime', 'endTime', 'devices'])",
+
+						"startTime": {
+							".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$/)"
+						},
+
+						"endTime": {
+							".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$/)"
+						},
+
+						"devices": {
+							"$deviceId": {
+								".validate": "newData.hasChildren(['tokens', 'cost', 'lastUpdate'])",
+
+								"tokens": {
+									".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 100000000"
+								},
+
+								"cost": {
+									".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 10000"
+								},
+
+								"lastUpdate": {
+									".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$/)"
+								},
+
+								"models": {
+									"$modelName": {
+										".validate": "newData.hasChildren(['tokens', 'cost'])",
+
+										"tokens": {
+											".validate": "newData.isNumber() && newData.val() >= 0"
+										},
+
+										"cost": {
+											".validate": "newData.isNumber() && newData.val() >= 0"
+										}
+									}
+								}
+							}
+						},
+
+						"aggregated": {
+							".validate": "newData.hasChildren(['totalTokens', 'totalCost'])",
+
+							"totalTokens": {
+								".validate": "newData.isNumber() && newData.val() >= 0"
+							},
+
+							"totalCost": {
+								".validate": "newData.isNumber() && newData.val() >= 0"
+							},
+
+							"projectedCost": {
+								".validate": "newData.isNumber() && newData.val() >= 0"
+							}
+						}
+					}
+				},
+
+				"liveMetrics": {
+					".validate": "newData.hasChildren(['currentRate', 'lastUpdate'])",
+
+					"currentRate": {
+						".validate": "newData.isNumber() && newData.val() >= 0 && newData.val() <= 1000000"
+					},
+
+					"lastUpdate": {
+						".validate": "newData.isString() && newData.val().matches(/^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d{3})?Z$/)"
+					}
+				}
+			}
+		}
+	}
+}

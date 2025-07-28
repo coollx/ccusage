@@ -5,6 +5,7 @@ import type { CollectionReference, DocumentData, DocumentReference, Firestore } 
 import type { SyncStatus } from './_types.ts';
 import type { SyncEngineV2 } from './sync-engine-v2.ts';
 import { Result } from '@praha/byethrow';
+import { log } from '../logger.ts';
 import { loadFirebaseConfig } from './config-manager.ts';
 import { RealtimeManager } from './realtime-manager.ts';
 import { UnifiedSyncEngine } from './unified-sync-engine.ts';
@@ -41,9 +42,9 @@ export class FirebaseClient {
 		const config = configResult.value;
 
 		// Dynamic imports to avoid loading Firebase SDK until needed
-		const initResult = await Result.try(async () => {
+		try {
 			const { initializeApp } = await import('firebase/app');
-			const { getAuth, signInAnonymously } = await import('firebase/auth');
+			const { getAuth, signInAnonymously, setPersistence, browserLocalPersistence } = await import('firebase/auth');
 			const { getFirestore } = await import('firebase/firestore');
 			const { getDatabase } = await import('firebase/database');
 
@@ -60,9 +61,27 @@ export class FirebaseClient {
 			this.firestore = getFirestore(this.app);
 			this.database = getDatabase(this.app);
 
-			// Sign in anonymously
-			const userCredential = await signInAnonymously(this.auth);
-			this.currentUser = userCredential.user;
+			// Wait for auth state to be restored
+			const { onAuthStateChanged } = await import('firebase/auth');
+			const user = await new Promise<User | null>((resolve) => {
+				const unsubscribe = onAuthStateChanged(this.auth!, (user) => {
+					unsubscribe();
+					resolve(user);
+				});
+			});
+
+			if (user) {
+				this.currentUser = user;
+			}
+			else {
+				// Sign in anonymously only if no existing session
+				const userCredential = await signInAnonymously(this.auth);
+				this.currentUser = userCredential.user;
+			}
+
+			if (!this.currentUser) {
+				throw new Error('Anonymous sign-in succeeded but no user returned');
+			}
 
 			// Initialize realtime manager
 			this.realtimeManager = new RealtimeManager();
@@ -76,10 +95,9 @@ export class FirebaseClient {
 			}
 
 			this.initialized = true;
-		});
-
-		if (Result.isFailure(initResult)) {
-			return Result.fail(new Error(`Failed to initialize Firebase: ${initResult.error.message}`));
+		}
+		catch (error: any) {
+			return Result.fail(new Error(`Failed to initialize Firebase: ${error.message}`));
 		}
 
 		return Result.succeed(undefined);
@@ -130,12 +148,14 @@ export class FirebaseClient {
 			return Result.fail(new Error('Firestore not initialized'));
 		}
 
-		const result = await Result.try(async () => {
+		try {
 			const { collection } = (await import('firebase/firestore'));
-			return collection(this.firestore!, path);
-		});
-
-		return result;
+			return Result.succeed(collection(this.firestore, path));
+		}
+		catch (error: any) {
+			log(`[FirebaseClient] Get collection failed for ${path}:`, error?.message || 'Unknown error');
+			return Result.fail(error as Error);
+		}
 	}
 
 	/**
@@ -146,12 +166,14 @@ export class FirebaseClient {
 			return Result.fail(new Error('Firestore not initialized'));
 		}
 
-		const result = await Result.try(async () => {
+		try {
 			const { doc } = (await import('firebase/firestore'));
-			return doc(this.firestore!, path);
-		});
-
-		return result;
+			return Result.succeed(doc(this.firestore, path));
+		}
+		catch (error: any) {
+			log(`[FirebaseClient] Get doc reference failed for ${path}:`, error?.message || 'Unknown error');
+			return Result.fail(error as Error);
+		}
 	}
 
 	/**
@@ -163,13 +185,17 @@ export class FirebaseClient {
 			return docResult;
 		}
 
-		const result = await Result.try(async () => {
+		try {
 			const { setDoc } = await import('firebase/firestore');
 			const docRef = (docResult as { value: DocumentReference<DocumentData> }).value;
 			await setDoc(docRef, data);
-		});
-
-		return result;
+			log(`[FirebaseClient] Document set successfully at ${path}`);
+			return Result.succeed(undefined);
+		}
+		catch (error: any) {
+			log(`[FirebaseClient] Set doc failed for ${path}:`, error?.message || 'Unknown error');
+			return Result.fail(error as Error);
+		}
 	}
 
 	/**
@@ -181,14 +207,17 @@ export class FirebaseClient {
 			return docResult;
 		}
 
-		const result = await Result.try(async () => {
+		// Don't use Result.try - it seems to be broken
+		try {
 			const { getDoc } = await import('firebase/firestore');
 			const docRef = (docResult as { value: DocumentReference<DocumentData> }).value;
 			const snapshot = await getDoc(docRef);
-			return snapshot.exists() ? (snapshot.data() as T) : null;
-		});
-
-		return result;
+			return Result.succeed(snapshot.exists() ? (snapshot.data() as T) : null);
+		}
+		catch (error: any) {
+			log(`[FirebaseClient] Get doc failed for ${path}:`, error?.message || 'Unknown error');
+			return Result.fail(error as Error);
+		}
 	}
 
 	/**
@@ -203,18 +232,21 @@ export class FirebaseClient {
 			return collectionResult;
 		}
 
-		const result = await Result.try(async () => {
+		// Don't use Result.try - it seems to be broken
+		try {
 			const { getDocs } = await import('firebase/firestore');
 
 			const collectionRef = (collectionResult as { value: CollectionReference<DocumentData> }).value;
 			const query = queryFn !== undefined ? queryFn(collectionRef) : collectionRef;
-			// eslint-disable-next-line ts/no-unsafe-argument
+
 			const snapshot = await getDocs(query);
 
-			return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as T));
-		});
-
-		return result;
+			return Result.succeed(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() } as T)));
+		}
+		catch (error: any) {
+			log(`[FirebaseClient] Query collection failed:`, error?.message || 'Unknown error');
+			return Result.fail(error as Error);
+		}
 	}
 
 	/**
@@ -225,19 +257,60 @@ export class FirebaseClient {
 			return Result.fail(new Error('Firestore not initialized'));
 		}
 
-		const result = await Result.try(async () => {
-			const { writeBatch, doc } = await import('firebase/firestore');
-			const batch = writeBatch(this.firestore!);
+		log(`[FirebaseClient] Starting batch write with ${operations.length} operations`);
+
+		// Log first operation for debugging
+		if (operations.length > 0) {
+			log(`[FirebaseClient] First operation path: ${operations[0].path}`);
+			log(`[FirebaseClient] First operation data:`, JSON.stringify(operations[0].data, null, 2));
+		}
+
+		// Don't use Result.try - it seems to be broken
+		try {
+			log(`[FirebaseClient] Importing Firebase modules...`);
+			const { writeBatch, doc, getDoc } = await import('firebase/firestore');
+			log(`[FirebaseClient] Creating batch...`);
+			const batch = writeBatch(this.firestore);
 
 			for (const op of operations) {
-				const docRef = doc(this.firestore!, op.path);
+				log(`[FirebaseClient] Adding to batch: ${op.path}`);
+				const docRef = doc(this.firestore, op.path);
 				batch.set(docRef, op.data);
 			}
 
+			log(`[FirebaseClient] Committing batch...`);
 			await batch.commit();
-		});
+			log(`[FirebaseClient] Batch commit completed`);
 
-		return result;
+			// Verify write by reading back first document
+			if (operations.length > 0) {
+				const firstPath = operations[0].path;
+				log(`[FirebaseClient] Verifying write at: ${firstPath}`);
+				try {
+					const verifyRef = doc(this.firestore, firstPath);
+					const verifySnap = await getDoc(verifyRef);
+					if (verifySnap.exists()) {
+						log(`[FirebaseClient] ✓ Write verified - document exists at ${firstPath}`);
+					}
+					else {
+						log(`[FirebaseClient] ✗ Write failed - document NOT found at ${firstPath}`);
+						log(`[FirebaseClient] This may be due to permission issues`);
+					}
+				}
+				catch (verifyError: any) {
+					log(`[FirebaseClient] ✗ Verification error:`, verifyError?.message || 'Unknown error');
+					log(`[FirebaseClient] Error code:`, verifyError?.code);
+				}
+			}
+
+			return Result.succeed(undefined);
+		}
+		catch (error: any) {
+			log(`[FirebaseClient] ❌ Batch write failed:`, error?.message || 'Unknown error');
+			log(`[FirebaseClient] Error code:`, error?.code);
+			log(`[FirebaseClient] Error stack:`, error?.stack);
+			return Result.fail(error as Error);
+		}
 	}
 
 	/**
@@ -249,14 +322,16 @@ export class FirebaseClient {
 			return docResult;
 		}
 
-		const result = await Result.try(async () => {
+		try {
 			const { getDoc } = await import('firebase/firestore');
 			const docRef = (docResult as { value: DocumentReference<DocumentData> }).value;
 			const snapshot = await getDoc(docRef);
-			return snapshot.exists();
-		});
-
-		return result;
+			return Result.succeed(snapshot.exists());
+		}
+		catch (error: any) {
+			log(`[FirebaseClient] Doc exists check failed for ${path}:`, error?.message || 'Unknown error');
+			return Result.fail(error as Error);
+		}
 	}
 
 	/**

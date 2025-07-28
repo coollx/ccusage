@@ -1246,9 +1246,14 @@ export async function loadSessionBlockData(
 if (import.meta.vitest != null) {
 	describe('formatDate', () => {
 		it('formats UTC timestamp to local date', () => {
-		// Test with UTC timestamps - results depend on local timezone
-			expect(formatDate('2024-01-01T00:00:00Z')).toBe('2024-01-01');
-			expect(formatDate('2024-12-31T23:59:59Z')).toBe('2024-12-31');
+			// Test with UTC noon to avoid timezone boundary issues
+			expect(formatDate('2024-01-01T12:00:00Z')).toBe('2024-01-01');
+			expect(formatDate('2024-12-31T12:00:00Z')).toBe('2024-12-31');
+
+			// Test timezone conversion - these will convert to local dates
+			const testDate = new Date('2024-12-31T23:59:59Z');
+			const expectedDate = `${testDate.getFullYear()}-${String(testDate.getMonth() + 1).padStart(2, '0')}-${String(testDate.getDate()).padStart(2, '0')}`;
+			expect(formatDate('2024-12-31T23:59:59Z')).toBe(expectedDate);
 		});
 
 		it('handles various date formats', () => {
@@ -1266,11 +1271,16 @@ if (import.meta.vitest != null) {
 
 	describe('formatDateCompact', () => {
 		it('formats UTC timestamp to local date with line break', () => {
-			expect(formatDateCompact('2024-01-01T00:00:00Z')).toBe('2024\n01-01');
+			// Use UTC noon to avoid timezone issues
+			expect(formatDateCompact('2024-01-01T12:00:00Z')).toBe('2024\n01-01');
 		});
 
 		it('handles various date formats', () => {
-			expect(formatDateCompact('2024-12-31T23:59:59Z')).toBe('2024\n12-31');
+			// Test timezone conversion - will convert to local date
+			const testDate = new Date('2024-12-31T23:59:59Z');
+			const expectedDate = `${testDate.getFullYear()}\n${String(testDate.getMonth() + 1).padStart(2, '0')}-${String(testDate.getDate()).padStart(2, '0')}`;
+			expect(formatDateCompact('2024-12-31T23:59:59Z')).toBe(expectedDate);
+
 			expect(formatDateCompact('2024-01-01')).toBe('2024\n01-01');
 			expect(formatDateCompact('2024-01-01T12:00:00')).toBe('2024\n01-01');
 			expect(formatDateCompact('2024-01-01T12:00:00.000Z')).toBe('2024\n01-01');
@@ -1294,22 +1304,24 @@ if (import.meta.vitest != null) {
 		});
 
 		it('aggregates daily usage data correctly', async () => {
-			// Use timestamps in the middle of the day to avoid timezone issues
+			// Use local date strings to ensure all entries are on the same date
+			// This avoids timezone conversion issues
+			const baseDate = new Date('2024-01-01T12:00:00');
 			const mockData1: UsageData[] = [
 				{
-					timestamp: createISOTimestamp('2024-01-01T10:00:00Z'),
+					timestamp: createISOTimestamp(baseDate.toISOString()),
 					message: { usage: { input_tokens: 100, output_tokens: 50 } },
 					costUSD: 0.01,
 				},
 				{
-					timestamp: createISOTimestamp('2024-01-01T12:00:00Z'),
+					timestamp: createISOTimestamp(new Date('2024-01-01T14:00:00').toISOString()),
 					message: { usage: { input_tokens: 200, output_tokens: 100 } },
 					costUSD: 0.02,
 				},
 			];
 
 			const mockData2: UsageData = {
-				timestamp: createISOTimestamp('2024-01-01T18:00:00Z'),
+				timestamp: createISOTimestamp(new Date('2024-01-01T16:00:00').toISOString()),
 				message: { usage: { input_tokens: 300, output_tokens: 150 } },
 				costUSD: 0.03,
 			};
@@ -1523,12 +1535,17 @@ if (import.meta.vitest != null) {
 		});
 
 		it('handles invalid JSON lines gracefully', async () => {
+			// Use local time to avoid timezone issues
+			const date1 = new Date('2024-01-01T12:00:00');
+			const date2 = new Date('2024-01-01T14:00:00');
+			const date3 = new Date('2024-01-01T16:00:00');
+
 			const mockData = `
-{"timestamp":"2024-01-01T12:00:00Z","message":{"usage":{"input_tokens":100,"output_tokens":50}},"costUSD":0.01}
+{"timestamp":"${date1.toISOString()}","message":{"usage":{"input_tokens":100,"output_tokens":50}},"costUSD":0.01}
 invalid json line
-{"timestamp":"2024-01-01T12:00:00Z","message":{"usage":{"input_tokens":200,"output_tokens":100}},"costUSD":0.02}
+{"timestamp":"${date2.toISOString()}","message":{"usage":{"input_tokens":200,"output_tokens":100}},"costUSD":0.02}
 { broken json
-{"timestamp":"2024-01-01T18:00:00Z","message":{"usage":{"input_tokens":300,"output_tokens":150}},"costUSD":0.03}
+{"timestamp":"${date3.toISOString()}","message":{"usage":{"input_tokens":300,"output_tokens":150}},"costUSD":0.03}
 `.trim();
 
 			await using fixture = await createFixture({
@@ -1550,13 +1567,20 @@ invalid json line
 		});
 
 		it('skips data without required fields', async () => {
+			// Use local time to ensure all valid entries are on the same date
+			const date1 = new Date('2024-01-01T12:00:00');
+			const date2 = new Date('2024-01-01T14:00:00');
+			const date3 = new Date('2024-01-01T16:00:00');
+			const date4 = new Date('2024-01-01T18:00:00');
+			const date5 = new Date('2024-01-01T20:00:00');
+
 			const mockData = `
-{"timestamp":"2024-01-01T12:00:00Z","message":{"usage":{"input_tokens":100,"output_tokens":50}},"costUSD":0.01}
-{"timestamp":"2024-01-01T14:00:00Z","message":{"usage":{}}}
-{"timestamp":"2024-01-01T18:00:00Z","message":{}}
-{"timestamp":"2024-01-01T20:00:00Z"}
+{"timestamp":"${date1.toISOString()}","message":{"usage":{"input_tokens":100,"output_tokens":50}},"costUSD":0.01}
+{"timestamp":"${date2.toISOString()}","message":{"usage":{}}}
+{"timestamp":"${date3.toISOString()}","message":{}}
+{"timestamp":"${date4.toISOString()}"}
 {"message":{"usage":{"input_tokens":200,"output_tokens":100}}}
-{"timestamp":"2024-01-01T22:00:00Z","message":{"usage":{"input_tokens":300,"output_tokens":150}},"costUSD":0.03}
+{"timestamp":"${date5.toISOString()}","message":{"usage":{"input_tokens":300,"output_tokens":150}},"costUSD":0.03}
 `.trim();
 
 			await using fixture = await createFixture({

@@ -1,6 +1,33 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
+    // Rate limiting function
+    function rateLimit(resource) {
+      let lastWrite = resource.data.lastUpdated;
+      let now = request.time;
+      // Enforce minimum 1 second between writes
+      return now > lastWrite + duration.value(1, 's');
+    }
+    
+    // Size validation function
+    function validateSize(data) {
+      // Limit document size to 100KB
+      return request.resource.size < 100 * 1024;
+    }
+    
+    // Encrypted field validation
+    function isValidEncryptedField(field) {
+      return field is map 
+        && field.keyId is string
+        && field.iv is string
+        && field.tag is string
+        && field.data is string
+        && field.keyId.size() == 36  // UUID format
+        && field.iv.size() > 20      // Base64 encoded
+        && field.tag.size() > 20     // Base64 encoded
+        && field.data.size() > 10;   // Base64 encoded
+    }
+    
     // Only authenticated users can access any data
     // This ensures anonymous auth is required at minimum
     match /{document=**} {
@@ -10,7 +37,10 @@ service cloud.firestore {
     // User data isolation - each user can only access their own data
     match /users/{userId} {
       // User can read/write their own user document
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      allow read: if request.auth != null && request.auth.uid == userId;
+      allow write: if request.auth != null 
+        && request.auth.uid == userId
+        && validateSize(request.resource.data);
       
       // Device collection - user owns all their devices
       match /devices/{deviceName} {
@@ -20,12 +50,17 @@ service cloud.firestore {
           && request.resource.data.deviceName == deviceName
           && request.resource.data.deviceId is string
           && request.resource.data.platform is string
-          && request.resource.data.createdAt is timestamp;
+          && request.resource.data.createdAt is timestamp
+          && validateSize(request.resource.data)
+          && request.resource.data.deviceName.size() <= 50  // Max 50 chars
+          && request.resource.data.deviceId.size() == 36;   // UUID format
         
         // Only allow updates from the same device (using deviceId)
         allow update: if request.auth != null 
           && request.auth.uid == userId
-          && request.resource.data.deviceId == resource.data.deviceId;
+          && request.resource.data.deviceId == resource.data.deviceId
+          && validateSize(request.resource.data)
+          && (!resource.data.exists() || rateLimit(resource));
         
         // User can read and delete their own devices
         allow read, delete: if request.auth != null && request.auth.uid == userId;
@@ -40,7 +75,15 @@ service cloud.firestore {
             && request.resource.data.deviceName == deviceName
             && request.resource.data.totalCost is number
             && request.resource.data.totalTokens is number
-            && request.resource.data.lastUpdated is timestamp;
+            && request.resource.data.lastUpdated is timestamp
+            && validateSize(request.resource.data)
+            && request.resource.data.totalCost >= 0
+            && request.resource.data.totalCost <= 10000  // Max $10k per day
+            && request.resource.data.totalTokens >= 0
+            && request.resource.data.totalTokens <= 100000000  // Max 100M tokens
+            && (!resource.data.exists() || rateLimit(resource))
+            // Validate encrypted fields if present
+            && (!('encryptedModels' in request.resource.data) || request.resource.data.encryptedModels.all(model, isValidEncryptedField(model)));
           
           // User can read usage data from all their devices
           allow read: if request.auth != null && request.auth.uid == userId;
@@ -64,7 +107,14 @@ service cloud.firestore {
           && request.auth.uid == userId
           && sessionKey.matches('^[a-zA-Z0-9_-]+_[a-zA-Z0-9_-]+$')
           && request.resource.data.projectId is string
-          && request.resource.data.sessionId is string;
+          && request.resource.data.sessionId is string
+          && validateSize(request.resource.data)
+          && request.resource.data.projectId.size() <= 100
+          && request.resource.data.sessionId.size() <= 100
+          && (!resource.data.exists() || rateLimit(resource))
+          // Validate encrypted fields if present
+          && (!('encryptedProjectId' in request.resource.data) || isValidEncryptedField(request.resource.data.encryptedProjectId))
+          && (!('encryptedSessionId' in request.resource.data) || isValidEncryptedField(request.resource.data.encryptedSessionId));
         
         // User can read all their session data
         allow read: if request.auth != null && request.auth.uid == userId;
@@ -77,10 +127,28 @@ service cloud.firestore {
           && request.auth.uid == userId
           && request.resource.data.deviceId == deviceId
           && request.resource.data.lastProcessedFile is string
-          && request.resource.data.lastSyncTimestamp is timestamp;
+          && request.resource.data.lastSyncTimestamp is timestamp
+          && validateSize(request.resource.data)
+          && request.resource.data.deviceId.size() == 36  // UUID format
+          && request.resource.data.lastProcessedFile.size() <= 500
+          && (!resource.data.exists() || rateLimit(resource));
         
         // User can read all sync checkpoints
         allow read: if request.auth != null && request.auth.uid == userId;
+      }
+      
+      // Privacy settings
+      match /privacy_settings/{document} {
+        allow read: if request.auth != null && request.auth.uid == userId;
+        allow write: if request.auth != null 
+          && request.auth.uid == userId
+          && document == 'config'
+          && validateSize(request.resource.data)
+          && request.resource.data.anonymizeProjects is bool
+          && request.resource.data.anonymizeSessions is bool
+          && request.resource.data.retentionDays is int
+          && request.resource.data.retentionDays >= 30
+          && request.resource.data.retentionDays <= 730;  // 30 days to 2 years
       }
     }
   }

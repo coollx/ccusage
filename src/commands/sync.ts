@@ -7,6 +7,7 @@ import Table from 'cli-table3';
 import { define } from 'gunshi';
 import pc from 'picocolors';
 import prompts from 'prompts';
+import { formatBytes, formatCurrency, formatNumber } from '../_utils.ts';
 import {
 	isFirebaseConfigured,
 	isSyncEnabled,
@@ -23,6 +24,7 @@ import {
 } from '../cloud-sync/device-manager.ts';
 import { getFirebaseClient } from '../cloud-sync/firebase-client.ts';
 import { getSyncEngine } from '../cloud-sync/sync-engine.ts';
+import { getUsageStatsCollector } from '../cloud-sync/usage-stats.ts';
 import { log } from '../logger.ts';
 
 /**
@@ -94,7 +96,7 @@ const initCommand = define({
 
 		const saveResult = await saveFirebaseConfig(config);
 		if (Result.isFailure(saveResult)) {
-			log(pc.red(`✗ Failed to save config: ${saveResult.value.message}`));
+			log(pc.red(`✗ Failed to save config: ${(saveResult as { error: Error }).error.message}`));
 			return;
 		}
 
@@ -102,13 +104,13 @@ const initCommand = define({
 		const initResult = await client.initialize();
 
 		if (Result.isFailure(initResult)) {
-			log(pc.red(`✗ Connection failed: ${initResult.value.message}`));
+			log(pc.red(`✗ Connection failed: ${(initResult as { error: Error }).error.message}`));
 			log(pc.yellow('\nPlease check your Firebase configuration and try again.'));
 			return;
 		}
 
 		log(pc.green('✓ Firebase connected successfully!\n'));
-		log(pc.gray(`Next step: Run ${pc.cyan('ccusage sync setup')} to configure your Firebase project.`));
+		log(pc.gray(`Next step: Run ${pc.cyan('ccusage sync-setup')} to configure your Firebase project.`));
 	},
 });
 
@@ -120,7 +122,7 @@ const setupCommand = define({
 	description: 'Deploy security rules and indexes to Firebase',
 	async run() {
 		if (!(await isFirebaseConfigured())) {
-			log(pc.yellow('Firebase not configured. Run \'ccusage sync init\' first.'));
+			log(pc.yellow('Firebase not configured. Run \'ccusage sync-init\' first.'));
 			return;
 		}
 
@@ -135,7 +137,7 @@ const setupCommand = define({
 
 			// Execute the setup script
 			const { execSync } = await import('node:child_process');
-			execSync(`node ${setupScriptPath}`, { stdio: 'inherit' });
+			execSync(`node "${setupScriptPath}"`, { stdio: 'inherit' });
 
 			log(pc.green('\n✅ Setup complete!'));
 		}
@@ -157,7 +159,7 @@ const enableCommand = define({
 	description: 'Enable cloud sync for this device',
 	async run() {
 		if (!(await isFirebaseConfigured())) {
-			log(pc.yellow('Firebase not configured. Run \'ccusage sync init\' first.'));
+			log(pc.yellow('Firebase not configured. Run \'ccusage sync-init\' first.'));
 			return;
 		}
 
@@ -166,20 +168,39 @@ const enableCommand = define({
 			return;
 		}
 
+		// Check if we have existing device settings (re-enabling)
+		const existingSettings = await loadSyncSettings();
+		if (Result.isSuccess(existingSettings) && existingSettings.value.deviceName && existingSettings.value.deviceId) {
+			log(pc.bold('🔄 Re-enabling cloud sync...\n'));
+
+			// Just update enabled flag
+			const result = await updateSyncSettings({ enabled: true });
+			if (Result.isFailure(result)) {
+				log(pc.red(`Failed to enable sync: ${(result as { error: Error }).error.message}`));
+				return;
+			}
+
+			log(pc.green('✓ Cloud sync re-enabled.'));
+			log(pc.gray(`Device: ${existingSettings.value.deviceName}`));
+			return;
+		}
+
 		log(pc.bold('🔄 Setting up cloud sync...\n'));
+
+		// Get Firebase client (don't reset to preserve auth state)
 
 		// Initialize Firebase client
 		const client = getFirebaseClient();
 		const initResult = await client.initialize();
 
 		if (Result.isFailure(initResult)) {
-			log(pc.red(`Failed to connect to Firebase: ${initResult.value.message}`));
+			log(pc.red(`Failed to connect to Firebase: ${(initResult as { error: Error }).error.message}`));
 			return;
 		}
 
 		const userIdResult = client.getUserId();
 		if (Result.isFailure(userIdResult)) {
-			log(pc.red(`Failed to authenticate: ${userIdResult.value.message}`));
+			log(pc.red(`Failed to authenticate: ${(userIdResult as { error: Error }).error.message}`));
 			return;
 		}
 
@@ -196,7 +217,7 @@ const enableCommand = define({
 					: 'Please choose a different name:',
 				validate: (value: string) => {
 					const result = validateDeviceName(value);
-					return Result.isSuccess(result) || (Result.isFailure(result) ? result.value.message : false);
+					return Result.isSuccess(result) || (Result.isFailure(result) ? (result as { error: Error }).error.message : false);
 				},
 			});
 
@@ -209,7 +230,7 @@ const enableCommand = define({
 			log(pc.gray(`\n✓ Checking device name availability...`));
 
 			// Check if name is already taken
-			const devicePath = `users/${userIdResult.value}/devices/${name}`;
+			const devicePath = `devices/${name}`;
 			const existsResult = await client.docExists(devicePath);
 
 			if (Result.isSuccess(existsResult) && existsResult.value) {
@@ -238,26 +259,27 @@ const enableCommand = define({
 
 		// Register device in Firebase
 		log(pc.gray('\n🔐 Creating anonymous account...'));
-		const devicePath = `users/${userIdResult.value}/devices/${deviceName}`;
+		const devicePath = `devices/${deviceName}`;
 		const setResult = await client.setDoc(devicePath, deviceInfo);
 
 		if (Result.isFailure(setResult)) {
-			log(pc.red(`Failed to register device: ${setResult.value.message}`));
+			log(pc.red(`Failed to register device: ${(setResult as { error: Error }).error.message}`));
 			return;
 		}
 
-		log(pc.green(`✓ Account created: ${userIdResult.value.substring(0, 12)}...`));
+		log(pc.green(`✓ Device registered successfully`));
 
-		// Save settings
+		// Save settings with user ID
 		const saveResult = await saveSyncSettings({
 			enabled: true,
 			deviceName,
 			deviceId: deviceInfo.deviceId,
+			userId: userIdResult.value,
 			retentionDays: 365,
 		});
 
 		if (Result.isFailure(saveResult)) {
-			log(pc.red(`Failed to save settings: ${saveResult.value.message}`));
+			log(pc.red(`Failed to save settings: ${(saveResult as { error: Error }).error.message}`));
 			return;
 		}
 
@@ -280,8 +302,6 @@ const enableCommand = define({
 
 		log(pc.green('\n✅ Cloud sync enabled!'));
 		log(pc.gray(`   Device: ${deviceName}`));
-		log(pc.gray(`   User ID: ${userIdResult.value.substring(0, 12)}...`));
-		log(pc.gray('\n💡 Tip: Run \'ccusage sync link --provider google\' to link a permanent account'));
 	},
 });
 
@@ -311,7 +331,7 @@ const disableCommand = define({
 
 		const result = await updateSyncSettings({ enabled: false });
 		if (Result.isFailure(result)) {
-			log(pc.red(`Failed to disable sync: ${result.value.message}`));
+			log(pc.red(`Failed to disable sync: ${(result as { error: Error }).error.message}`));
 			return;
 		}
 
@@ -382,14 +402,120 @@ const statusCommand = define({
 
 		// Test connection
 		log(pc.gray('\nTesting connection...'));
-		const syncEngine = getSyncEngine();
-		const statusResult = await syncEngine.getStatus();
 
-		if (Result.isSuccess(statusResult)) {
-			log(`Connection: ${statusResult.value.connected ? pc.green('✓ Connected') : pc.red('✗ Not connected')}`);
+		// Initialize Firebase client (don't reset to preserve auth state)
+		const client = getFirebaseClient();
+		const initResult = await client.initialize();
+
+		if (Result.isFailure(initResult)) {
+			log(`Connection: ${pc.red('✗ Not connected')} - ${(initResult as { error: Error }).error.message}`);
 		}
 		else {
-			log(`Connection: ${pc.red('✗ Error')}`);
+			const syncEngine = getSyncEngine();
+			const statusResult = await syncEngine.getStatus();
+
+			if (Result.isSuccess(statusResult)) {
+				log(`Connection: ${statusResult.value.connected ? pc.green('✓ Connected') : pc.red('✗ Not connected')}`);
+			}
+			else {
+				log(`Connection: ${pc.red('✗ Error')}`);
+			}
+		}
+
+		// Load and display sync statistics
+		log(pc.bold('\n📈 Sync Statistics\n'));
+
+		const statsCollector = getUsageStatsCollector();
+		const statsResult = await statsCollector.getStatsSummary();
+
+		if (Result.isSuccess(statsResult)) {
+			const stats = statsResult.value;
+
+			// Overall stats
+			const successRate = stats.totalSyncs > 0
+				? ((stats.successfulSyncs / stats.totalSyncs) * 100).toFixed(1)
+				: '0.0';
+
+			log(`Total syncs: ${pc.cyan(stats.totalSyncs.toString())}`);
+			log(`Success rate: ${pc.green(`${successRate}%`)} (${stats.successfulSyncs} successful, ${stats.failedSyncs} failed)`);
+			log(`Records synced: ${pc.cyan(formatNumber(stats.totalRecordsSynced))}`);
+			log(`Data transferred: ${pc.cyan(formatBytes(stats.totalBytesTransferred))}`);
+
+			if (stats.averageSyncDuration > 0) {
+				log(`Average sync time: ${pc.cyan(`${(stats.averageSyncDuration / 1000).toFixed(1)}s`)}`);
+			}
+
+			// Recent activity
+			const recentActivity = statsCollector.getRecentActivity(7);
+			if (recentActivity.length > 0) {
+				log(pc.bold('\n📅 Last 7 Days Activity\n'));
+
+				const activityTable = new Table({
+					head: ['Date', 'Syncs', 'Records', 'Data', 'Errors'],
+					style: { head: ['cyan'] },
+					colAligns: ['left', 'right', 'right', 'right', 'right'],
+				});
+
+				for (const daily of recentActivity) {
+					activityTable.push([
+						daily.date,
+						daily.syncs.toString(),
+						formatNumber(daily.recordsSynced),
+						formatBytes(daily.bytesTransferred),
+						daily.errors > 0 ? pc.red(daily.errors.toString()) : pc.green('0'),
+					]);
+				}
+
+				log(activityTable.toString());
+			}
+
+			// Storage usage
+			const storage = statsCollector.estimateStorageUsage(stats);
+			log(pc.bold('\n💾 Storage Usage\n'));
+			log(`Documents: ${pc.cyan(formatNumber(storage.documentsCount))}`);
+			log(`Estimated size: ${pc.cyan(formatBytes(storage.estimatedSize))}`);
+			log(`  Daily data: ${formatBytes(storage.dailyData)}`);
+			log(`  Session data: ${formatBytes(storage.sessionData)}`);
+			log(`  Aggregated data: ${formatBytes(storage.aggregatedData)}`);
+
+			// Projected costs
+			const costs = statsCollector.calculateProjectedCosts(stats);
+			log(pc.bold('\n💰 Projected Monthly Costs\n'));
+			log(`Firestore reads: ${pc.cyan(formatNumber(costs.firestoreReads))}`);
+			log(`Firestore writes: ${pc.cyan(formatNumber(costs.firestoreWrites))}`);
+			log(`Estimated cost: ${costs.estimatedCost > 0 ? pc.yellow(formatCurrency(costs.estimatedCost)) : pc.green('$0.00 (within free tier)')}`);
+
+			// Device breakdown
+			if (Object.keys(stats.deviceStats).length > 0) {
+				log(pc.bold('\n📱 Device Statistics\n'));
+
+				const deviceTable = new Table({
+					head: ['Device', 'Syncs', 'Records', 'Data', 'Last Seen'],
+					style: { head: ['cyan'] },
+					colAligns: ['left', 'right', 'right', 'right', 'left'],
+				});
+
+				for (const [deviceId, device] of Object.entries(stats.deviceStats)) {
+					const lastSeen = new Date(device.lastSeen);
+					const isCurrentDevice = Result.isSuccess(settingsResult) && settingsResult.value.deviceId === deviceId;
+					const deviceName = isCurrentDevice
+						? `${device.deviceName} ${pc.green('(current)')}`
+						: device.deviceName;
+
+					deviceTable.push([
+						deviceName,
+						device.totalSyncs.toString(),
+						formatNumber(device.recordsSynced),
+						formatBytes(device.bytesTransferred),
+						lastSeen.toLocaleDateString(),
+					]);
+				}
+
+				log(deviceTable.toString());
+			}
+		}
+		else {
+			log(pc.gray('No sync statistics available yet.'));
 		}
 	},
 });
@@ -402,7 +528,7 @@ const nowCommand = define({
 	description: 'Force immediate sync',
 	async run() {
 		if (!(await isSyncEnabled())) {
-			log(pc.yellow('Sync is not enabled. Run \'ccusage sync enable\' first.'));
+			log(pc.yellow('Sync is not enabled. Run \'ccusage sync-enable\' first.'));
 			return;
 		}
 
@@ -437,7 +563,7 @@ const devicesCommand = define({
 	description: 'List all registered devices',
 	async run() {
 		if (!(await isFirebaseConfigured())) {
-			log(pc.yellow('Firebase not configured. Run \'ccusage sync init\' first.'));
+			log(pc.yellow('Firebase not configured. Run \'ccusage sync-init\' first.'));
 			return;
 		}
 
@@ -446,31 +572,46 @@ const devicesCommand = define({
 		const initResult = await client.initialize();
 
 		if (Result.isFailure(initResult)) {
-			log(pc.red(`Failed to connect: ${initResult.value.message}`));
+			log(pc.red(`Failed to connect: ${(initResult as { error: Error }).error.message}`));
 			return;
 		}
 
-		const userIdResult = client.getUserId();
-		if (Result.isFailure(userIdResult)) {
-			log(pc.red(`Failed to authenticate: ${userIdResult.value.message}`));
-			return;
-		}
-
-		// Get current device ID
+		// Get saved settings to find the correct user ID
 		const settingsResult = await loadSyncSettings();
-		const currentDeviceId = Result.isSuccess(settingsResult) ? settingsResult.value.deviceId : undefined;
+		if (Result.isFailure(settingsResult) || !settingsResult.value.userId) {
+			log(pc.yellow('No sync settings found. Have you enabled sync?'));
+			return;
+		}
 
-		// Fetch devices
-		const devicesPath = `users/${userIdResult.value}/devices`;
+		const settings = settingsResult.value;
+		const userId = settings.userId;
+		const currentDeviceId = settings.deviceId;
+
+		// Fetch devices (no longer need user ID)
+		const devicesPath = `devices`;
+		log(pc.gray(`Fetching devices from: ${devicesPath}`));
+
+		// First, let's check if the current device exists
+		if (settings.deviceName) {
+			const currentDevicePath = `${devicesPath}/${settings.deviceName}`;
+			log(pc.gray(`Checking current device at: ${currentDevicePath}`));
+			const currentDeviceResult = await client.getDoc<DeviceInfo>(currentDevicePath);
+			if (Result.isSuccess(currentDeviceResult) && currentDeviceResult.value) {
+				log(pc.gray(`Found current device: ${settings.deviceName}`));
+			}
+		}
+
 		const devicesResult = await client.queryCollection<DeviceInfo>(devicesPath);
 
 		if (Result.isFailure(devicesResult)) {
-			log(pc.red(`Failed to fetch devices: ${devicesResult.value.message}`));
+			log(pc.red(`Failed to fetch devices: ${(devicesResult as { error: Error }).error.message}`));
 			return;
 		}
 
 		const devices = devicesResult.value;
-		if (devices.length === 0) {
+		log(pc.gray(`Found ${devices?.length || 0} devices in collection`));
+
+		if (!devices || devices.length === 0) {
 			log(pc.yellow('No devices registered yet.'));
 			return;
 		}
@@ -504,26 +645,29 @@ const devicesCommand = define({
 export const syncCommand = define({
 	name: 'sync',
 	description: 'Manage cloud sync for multi-device usage aggregation',
-	subCommands: new Map([
-		['init', initCommand],
-		['setup', setupCommand],
-		['enable', enableCommand],
-		['disable', disableCommand],
-		['status', statusCommand],
-		['now', nowCommand],
-		['devices', devicesCommand],
-	]),
 	async run() {
 		// Show help when no subcommand is provided
 		log(pc.bold('Cloud Sync Commands:\n'));
-		log(`  ${pc.cyan('ccusage sync init')}     - Configure Firebase credentials`);
-		log(`  ${pc.cyan('ccusage sync setup')}    - Deploy security rules and indexes`);
-		log(`  ${pc.cyan('ccusage sync enable')}   - Enable sync with device naming`);
-		log(`  ${pc.cyan('ccusage sync disable')}  - Disable sync`);
-		log(`  ${pc.cyan('ccusage sync status')}   - Show sync status`);
-		log(`  ${pc.cyan('ccusage sync now')}      - Force immediate sync`);
-		log(`  ${pc.cyan('ccusage sync devices')}  - List registered devices`);
+		log(`  ${pc.cyan('ccusage sync-init')}     - Configure Firebase credentials`);
+		log(`  ${pc.cyan('ccusage sync-setup')}    - Deploy security rules and indexes`);
+		log(`  ${pc.cyan('ccusage sync-enable')}   - Enable sync with device naming`);
+		log(`  ${pc.cyan('ccusage sync-disable')}  - Disable sync`);
+		log(`  ${pc.cyan('ccusage sync-status')}   - Show sync status`);
+		log(`  ${pc.cyan('ccusage sync-now')}      - Force immediate sync`);
+		log(`  ${pc.cyan('ccusage sync-devices')}  - List registered devices`);
 		log();
 		log(pc.gray('Run any command with --help for more information.'));
+		log(pc.gray('\nNote: Due to a Gunshi limitation, use hyphenated commands (e.g., sync-init) instead of nested subcommands.'));
 	},
 });
+
+// Export subcommands for use in individual command files
+export const syncSubCommands = new Map([
+	['init', initCommand],
+	['setup', setupCommand],
+	['enable', enableCommand],
+	['disable', disableCommand],
+	['status', statusCommand],
+	['now', nowCommand],
+	['devices', devicesCommand],
+]);

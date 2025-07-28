@@ -1,10 +1,11 @@
 import type { DailyUsage, ModelBreakdown } from '../data-loader.ts';
 import type { AggregatedUsageDocument, DeviceUsageDocument, SyncCheckpoint, SyncResult } from './_types.ts';
 import type { DeduplicationEntry } from './deduplication.ts';
+import process from 'node:process';
 import { Result } from '@praha/byethrow';
 import { createDailyDate, createISOTimestamp } from '../_types.ts';
 import { loadDailyUsageData } from '../data-loader.ts';
-import { logger } from '../logger.ts';
+import { log, logger } from '../logger.ts';
 import { getCloudAggregator } from './aggregation.ts';
 import { loadSyncSettings, updateSyncSettings } from './config-manager.ts';
 import { ConflictQueue } from './conflict-resolution.ts';
@@ -32,14 +33,7 @@ export class SyncEngine {
 			return initResult;
 		}
 
-		// Get user ID
-		const userIdResult = this.client.getUserId();
-		if (Result.isFailure(userIdResult)) {
-			return userIdResult;
-		}
-		this.userId = userIdResult.value;
-
-		// Load sync settings
+		// Load sync settings first
 		const settingsResult = await loadSyncSettings();
 		if (Result.isFailure(settingsResult)) {
 			return settingsResult;
@@ -53,6 +47,36 @@ export class SyncEngine {
 		this.deviceName = settings.deviceName;
 		this.deviceId = settings.deviceId;
 
+		// No user ID needed - each Firebase project belongs to one person
+		// We'll remove the userId from settings later
+		this.userId = 'not-used'; // Keep for backward compatibility temporarily
+
+		// Ensure device document exists
+		const devicePath = `devices/${this.deviceName}`;
+		const deviceExistsResult = await this.client.docExists(devicePath);
+
+		if (Result.isSuccess(deviceExistsResult) && !deviceExistsResult.value) {
+			log(`[SyncEngine] Creating device document at ${devicePath}`);
+			const deviceInfo = {
+				deviceId: this.deviceId,
+				deviceName: this.deviceName,
+				platform: process.platform,
+				createdAt: new Date().toISOString(),
+				syncVersion: 1,
+			};
+
+			const createResult = await this.client.setDoc(devicePath, deviceInfo);
+			if (Result.isFailure(createResult)) {
+				log(`[SyncEngine] Warning: Failed to create device document`);
+			}
+			else {
+				log(`[SyncEngine] Device document created successfully`);
+			}
+		}
+		else if (Result.isSuccess(deviceExistsResult) && deviceExistsResult.value) {
+			log(`[SyncEngine] Device document already exists at ${devicePath}`);
+		}
+
 		return Result.succeed(undefined);
 	}
 
@@ -61,7 +85,7 @@ export class SyncEngine {
 	 */
 	private async loadDeduplicationStore(): Promise<Result<void, Error>> {
 		try {
-			const deduplicationPath = `users/${this.userId}/deduplication`;
+			const deduplicationPath = `deduplication`;
 			const entriesResult = await this.client.queryCollection<DeduplicationEntry>(
 				deduplicationPath,
 				{ limit: 1000 }, // Load recent entries
@@ -93,7 +117,7 @@ export class SyncEngine {
 		if (entries.length === 0) { return Result.succeed(undefined); }
 
 		const operations = entries.map(entry => ({
-			path: `users/${this.userId}/deduplication/${entry.hash}`,
+			path: `deduplication/${entry.hash}`,
 			data: entry,
 		}));
 
@@ -110,24 +134,26 @@ export class SyncEngine {
 		if (!this.userId || !this.deviceName || !this.deviceId) {
 			const initResult = await this.initialize();
 			if (Result.isFailure(initResult)) {
-				return { success: false, error: initResult.value.message };
+				return { success: false, error: (initResult as { error: Error }).error.message };
 			}
 		}
 
 		try {
 			// Load local data
+			log('[SyncEngine] Loading local usage data...');
 			const localData = await loadDailyUsageData({
 				mode: 'auto',
 				order: 'asc',
-				offline: true, // Load only local data
+				// Remove offline: true to ensure we load all available data
 			});
+			log(`[SyncEngine] Loaded ${localData.length} local records`);
 
 			if (localData.length === 0) {
 				return { success: true, recordsSynced: 0, duration: Date.now() - startTime };
 			}
 
 			// Get last sync checkpoint
-			const checkpointPath = `users/${this.userId}/sync_checkpoints/${this.deviceId}`;
+			const checkpointPath = `sync_checkpoints/${this.deviceId}`;
 			const checkpointResult = await this.client.getDoc<SyncCheckpoint>(checkpointPath);
 			const lastSync = Result.isSuccess(checkpointResult) && checkpointResult.value
 				? new Date(checkpointResult.value.lastSyncTimestamp)
@@ -146,14 +172,18 @@ export class SyncEngine {
 			}
 
 			// Group by date for aggregation
+			log(`[SyncEngine] Grouping ${dataToSync.length} records by date...`);
 			const dailyGroups = this.groupByDate(dataToSync);
+			log(`[SyncEngine] Found ${dailyGroups.size} unique dates`);
 
 			// Prepare batch operations
 			const operations: Array<{ path: string; data: DeviceUsageDocument }> = [];
 
 			for (const [date, entries] of dailyGroups.entries()) {
+				log(`[SyncEngine] Processing date ${date} with ${entries.length} entries`);
 				const aggregated = this.aggregateDailyData(entries);
-				const docPath = `users/${this.userId}/devices/${this.deviceName}/usage/${date}`;
+				const docPath = `devices/${this.deviceName}/usage/${date}`;
+				log(`[SyncEngine] Prepared document path: ${docPath}`);
 
 				operations.push({
 					path: docPath,
@@ -174,7 +204,7 @@ export class SyncEngine {
 			// Execute batch write
 			const batchResult = await this.client.batchWrite(operations);
 			if (Result.isFailure(batchResult)) {
-				return { success: false, error: batchResult.value.message };
+				return { success: false, error: (batchResult as { error: Error }).error.message };
 			}
 
 			// Update sync checkpoint
@@ -188,7 +218,19 @@ export class SyncEngine {
 
 			const checkpointUpdateResult = await this.client.setDoc(checkpointPath, newCheckpoint);
 			if (Result.isFailure(checkpointUpdateResult)) {
-				logger.warn('Failed to update sync checkpoint:', checkpointUpdateResult.value.message);
+				logger.warn('Failed to update sync checkpoint:', (checkpointUpdateResult as { error: Error }).error.message);
+			}
+
+			// Update device document with last sync timestamp
+			const devicePath = `devices/${this.deviceName}`;
+			const deviceUpdateResult = await this.client.getDoc(devicePath);
+			if (Result.isSuccess(deviceUpdateResult) && deviceUpdateResult.value) {
+				const deviceData = deviceUpdateResult.value;
+				const updatedDeviceData = {
+					...deviceData,
+					lastSyncTimestamp: new Date().toISOString(),
+				};
+				await this.client.setDoc(devicePath, updatedDeviceData);
 			}
 
 			// Update local sync settings
@@ -265,7 +307,7 @@ export class SyncEngine {
 		}
 
 		// First check if we have a pre-aggregated document
-		const aggregatedPath = `users/${this.userId}/usage_aggregated/${date}`;
+		const aggregatedPath = `usage_aggregated/${date}`;
 		const aggregatedResult = await this.client.getDoc<AggregatedUsageDocument>(aggregatedPath);
 
 		if (Result.isSuccess(aggregatedResult) && aggregatedResult.value) {
@@ -273,7 +315,7 @@ export class SyncEngine {
 		}
 
 		// If no pre-aggregated data, fetch from all devices
-		const devicesPath = `users/${this.userId}/devices`;
+		const devicesPath = `devices`;
 		const devicesResult = await this.client.queryCollection<{ id: string }>(devicesPath);
 
 		if (Result.isFailure(devicesResult)) {
@@ -351,6 +393,7 @@ export class SyncEngine {
 		outputTokens: number;
 		cachedTokens: number;
 	} {
+		log(`[SyncEngine] Aggregating ${entries.length} entries`);
 		const modelMap = new Map<string, ModelBreakdown>();
 		let totalCost = 0;
 		let totalTokens = 0;
@@ -359,29 +402,62 @@ export class SyncEngine {
 		let cachedTokens = 0;
 
 		for (const entry of entries) {
-			totalCost += entry.totalCost;
-			totalTokens += entry.totalTokens;
+			// Debug log entry structure
+			if (!entry.models) {
+				log(`[SyncEngine] Warning: Entry missing models property:`, {
+					date: entry.date,
+					totalCost: entry.totalCost,
+					totalTokens: entry.totalTokens,
+					hasModels: 'models' in entry,
+					entryKeys: Object.keys(entry),
+				});
+			}
+
+			totalCost += entry.totalCost || entry.cost || 0;
+			// Calculate totalTokens from input/output if not available
+			const entryTotalTokens = entry.totalTokens
+				|| ((entry.inputTokens || 0) + (entry.outputTokens || 0)
+					+ (entry.cacheCreationTokens || 0) + (entry.cacheReadTokens || 0));
+			totalTokens += entryTotalTokens;
 			inputTokens += entry.inputTokens || 0;
 			outputTokens += entry.outputTokens || 0;
-			cachedTokens += entry.cachedTokens || 0;
+			cachedTokens += entry.cachedTokens || entry.cacheReadTokens || 0;
 
-			// Aggregate by model
-			for (const model of entry.models) {
-				const existing = modelMap.get(model.model);
-				if (existing) {
-					existing.cost += model.cost;
-					existing.tokens += model.tokens;
-					existing.inputTokens = (existing.inputTokens || 0) + (model.inputTokens || 0);
-					existing.outputTokens = (existing.outputTokens || 0) + (model.outputTokens || 0);
-					existing.cachedTokens = (existing.cachedTokens || 0) + (model.cachedTokens || 0);
-				}
-				else {
-					modelMap.set(model.model, { ...model });
+			// Aggregate by model - handle both 'models' and 'modelBreakdowns' fields
+			const models = entry.models || entry.modelBreakdowns;
+			if (models && Array.isArray(models)) {
+				log(`[SyncEngine] Processing ${models.length} models for entry`);
+				for (const model of models) {
+					// Handle different field names (model vs modelName)
+					const modelName = model.model || model.modelName;
+					if (!modelName) {
+						log(`[SyncEngine] Warning: Model entry missing name:`, model);
+						continue;
+					}
+
+					const existing = modelMap.get(modelName);
+					if (existing) {
+						existing.cost += model.cost || 0;
+						existing.tokens += model.tokens || 0;
+						existing.inputTokens = (existing.inputTokens || 0) + (model.inputTokens || 0);
+						existing.outputTokens = (existing.outputTokens || 0) + (model.outputTokens || 0);
+						existing.cachedTokens = (existing.cachedTokens || 0) + (model.cachedTokens || 0);
+					}
+					else {
+						modelMap.set(modelName, {
+							model: modelName,
+							cost: model.cost || 0,
+							tokens: model.tokens || 0,
+							inputTokens: model.inputTokens || 0,
+							outputTokens: model.outputTokens || 0,
+							cachedTokens: model.cachedTokens || 0,
+						});
+					}
 				}
 			}
 		}
 
-		return {
+		const result = {
 			models: Array.from(modelMap.values()),
 			totalCost,
 			totalTokens,
@@ -389,6 +465,14 @@ export class SyncEngine {
 			outputTokens,
 			cachedTokens,
 		};
+
+		log(`[SyncEngine] Aggregation result:`, {
+			modelsCount: result.models.length,
+			totalCost: result.totalCost,
+			totalTokens: result.totalTokens,
+		});
+
+		return result;
 	}
 
 	/**
@@ -402,6 +486,14 @@ export class SyncEngine {
 	 * Gets sync status
 	 */
 	async getStatus(): Promise<Result<{ connected: boolean; lastSync?: string; deviceName?: string }, Error>> {
+		// First check if we're initialized
+		if (!this.userId || !this.deviceName || !this.deviceId) {
+			const initResult = await this.initialize();
+			if (Result.isFailure(initResult)) {
+				return Result.succeed({ connected: false });
+			}
+		}
+
 		const status = await this.client.getSyncStatus();
 
 		if (!status.connected) {

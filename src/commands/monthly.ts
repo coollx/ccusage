@@ -8,6 +8,7 @@ import {
 	createTotalsObject,
 	getTotalTokens,
 } from '../calculate-cost.ts';
+import { determineDataSource, formatDataSource } from '../cloud-sync/cloud-indicator.ts';
 import { getCommandExecutor } from '../cloud-sync/command-executor.ts';
 import { formatDateCompact, loadMonthlyUsageData } from '../data-loader.ts';
 import { detectMismatches, printMismatchReport } from '../debug.ts';
@@ -17,12 +18,34 @@ export const monthlyCommand = define({
 	name: 'monthly',
 	description: 'Show usage report grouped by month',
 	...sharedCommandConfig,
+	args: {
+		...sharedCommandConfig.args,
+		cloud: {
+			type: 'boolean',
+			description: 'Show aggregated data from all devices (cloud sync)',
+			default: false,
+		},
+		local: {
+			type: 'boolean',
+			description: 'Force local-only mode (no cloud data)',
+			default: false,
+		},
+	},
 	async run(ctx) {
 		const executor = getCommandExecutor();
 
 		return executor.execute('monthly', ctx.values, async () => {
 			if (ctx.values.json) {
 				logger.level = 0;
+			}
+
+			// Determine data source based on flags
+			const dataSource = determineDataSource({ cloud: ctx.values.cloud, local: ctx.values.local });
+
+			if (dataSource === 'cloud' && !ctx.values.local) {
+				// TODO: Load cloud data when cloud sync is available
+				// For now, fall back to local data
+				logger.warn('Cloud sync not yet fully implemented, showing local data');
 			}
 
 			const monthlyData = await loadMonthlyUsageData({
@@ -82,8 +105,9 @@ export const monthlyCommand = define({
 				log(JSON.stringify(jsonOutput, null, 2));
 			}
 			else {
-			// Print header
-				logger.box('Claude Code Token Usage Report - Monthly');
+			// Print header with data source indicator
+				const headerText = `Claude Code Token Usage Report - Monthly ${formatDataSource(dataSource)}`;
+				logger.box(headerText);
 
 				// Create table with compact mode support
 				const table = new ResponsiveTable({

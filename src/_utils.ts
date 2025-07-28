@@ -304,6 +304,21 @@ export function formatCurrency(amount: number): string {
 }
 
 /**
+ * Formats bytes into human-readable format
+ * @param bytes - The number of bytes to format
+ * @returns Formatted string with appropriate unit (e.g., "1.23 MB")
+ */
+export function formatBytes(bytes: number): string {
+	if (bytes === 0) { return '0 B'; }
+
+	const k = 1024;
+	const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+	const i = Math.floor(Math.log(bytes) / Math.log(k));
+
+	return `${Number.parseFloat((bytes / k ** i).toFixed(2))} ${sizes[i]}`;
+}
+
+/**
  * Formats Claude model names into a shorter, more readable format
  * Extracts model type and generation from full model name
  * @param modelName - Full model name (e.g., "claude-sonnet-4-20250514")
@@ -477,11 +492,11 @@ if (import.meta.vitest != null) {
 				table.toString(); // This triggers compact mode calculation
 
 				// Access private method for testing
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const config = (table as any).getCurrentTableConfig();
-				// eslint-disable-next-line ts/no-unsafe-member-access
+
 				expect(config.head).toEqual(['Date', 'Model', 'Cost']);
-				// eslint-disable-next-line ts/no-unsafe-member-access
+
 				expect(config.colAligns).toEqual(['left', 'left', 'right']);
 
 				// Restore original value
@@ -505,11 +520,11 @@ if (import.meta.vitest != null) {
 				table.toString(); // This triggers compact mode calculation
 
 				// Access private method for testing
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const config = (table as any).getCurrentTableConfig();
-				// eslint-disable-next-line ts/no-unsafe-member-access
+
 				expect(config.head).toEqual(['Date', 'Model', 'Input', 'Output', 'Cost']);
-				// eslint-disable-next-line ts/no-unsafe-member-access
+
 				expect(config.colAligns).toEqual(['left', 'left', 'right', 'right', 'right']);
 
 				// Restore original value
@@ -533,7 +548,7 @@ if (import.meta.vitest != null) {
 				table.toString(); // This triggers compact mode calculation
 
 				// Access private method for testing
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const indices = (table as any).getCompactIndices();
 				expect(indices).toEqual([0, 1, 4]); // Date (0), Model (1), Cost (4)
 
@@ -561,7 +576,7 @@ if (import.meta.vitest != null) {
 				table.toString(); // This triggers compact mode calculation
 
 				// Access private method for testing
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const indices = (table as any).getCompactIndices();
 				expect(indices).toEqual([0, 0, 4]); // Date (0), fallback to first (0), Cost (4)
 
@@ -590,7 +605,7 @@ if (import.meta.vitest != null) {
 				table.toString(); // This triggers compact mode calculation
 
 				// Access private method for testing
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const indices = (table as any).getCompactIndices();
 				expect(indices).toEqual([0, 1, 2, 3, 4]); // All columns
 
@@ -605,7 +620,7 @@ if (import.meta.vitest != null) {
 				});
 
 				// Access private method for testing
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const indices = (table as any).getCompactIndices();
 				expect(indices).toEqual([0, 1, 2, 3, 4]); // All columns
 			});
@@ -673,7 +688,7 @@ if (import.meta.vitest != null) {
 				const originalStdoutColumns = process.stdout.columns;
 
 				process.env.COLUMNS = undefined;
-				// eslint-disable-next-line ts/no-unsafe-member-access
+
 				(process.stdout as any).columns = 80;
 
 				table.push(['2024-01-01', 'sonnet-4', '1000', '500', '$1.50']);
@@ -698,7 +713,7 @@ if (import.meta.vitest != null) {
 				const originalStdoutColumns = process.stdout.columns;
 
 				process.env.COLUMNS = undefined;
-				// eslint-disable-next-line ts/no-unsafe-member-access
+
 				(process.stdout as any).columns = undefined;
 
 				table.push(['2024-01-01', 'sonnet-4', '1000', '500', '$1.50']);
@@ -801,6 +816,46 @@ if (import.meta.vitest != null) {
 		it('handles models that do not match pattern with bullet points', () => {
 			const models = ['custom-model', 'claude-sonnet-4-20250514'];
 			expect(formatModelsDisplayMultiline(models)).toBe('- custom-model\n- sonnet-4');
+		});
+	});
+
+	describe('formatBytes', () => {
+		it('formats zero bytes', () => {
+			expect(formatBytes(0)).toBe('0 B');
+		});
+
+		it('formats bytes', () => {
+			expect(formatBytes(100)).toBe('100 B');
+			expect(formatBytes(1023)).toBe('1023 B');
+		});
+
+		it('formats kilobytes', () => {
+			expect(formatBytes(1024)).toBe('1 KB');
+			expect(formatBytes(1536)).toBe('1.5 KB');
+			expect(formatBytes(10240)).toBe('10 KB');
+		});
+
+		it('formats megabytes', () => {
+			expect(formatBytes(1048576)).toBe('1 MB');
+			expect(formatBytes(1572864)).toBe('1.5 MB');
+			expect(formatBytes(10485760)).toBe('10 MB');
+		});
+
+		it('formats gigabytes', () => {
+			expect(formatBytes(1073741824)).toBe('1 GB');
+			expect(formatBytes(1610612736)).toBe('1.5 GB');
+			expect(formatBytes(10737418240)).toBe('10 GB');
+		});
+
+		it('formats terabytes', () => {
+			expect(formatBytes(1099511627776)).toBe('1 TB');
+			expect(formatBytes(2199023255552)).toBe('2 TB');
+		});
+
+		it('formats with two decimal places', () => {
+			expect(formatBytes(1234)).toBe('1.21 KB');
+			expect(formatBytes(1234567)).toBe('1.18 MB');
+			expect(formatBytes(1234567890)).toBe('1.15 GB');
 		});
 	});
 }

@@ -1,10 +1,10 @@
-import type { FirebaseConfig, SyncSettings } from './_types.ts';
+import type { FirebaseConfig, SecurityConfig, SyncSettings } from './_types.ts';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { Result } from '@praha/byethrow';
-import { firebaseConfigSchema, syncSettingsSchema } from './_types.ts';
+import { firebaseConfigSchema, securityConfigSchema, syncSettingsSchema } from './_types.ts';
 
 /**
  * Get configuration directory
@@ -25,6 +25,10 @@ function getFirebaseConfigPath(): string {
 
 function getSyncSettingsPath(): string {
 	return join(getConfigDir(), 'sync.json');
+}
+
+function getSecurityConfigPath(): string {
+	return join(getConfigDir(), 'security.json');
 }
 
 /**
@@ -63,9 +67,9 @@ export async function loadFirebaseConfig(): Promise<Result<FirebaseConfig, Error
  * Saves Firebase configuration to disk
  */
 export async function saveFirebaseConfig(config: FirebaseConfig): Promise<Result<void, Error>> {
-	const dirResult: Result<void, Error> = await ensureConfigDir();
-	if (Result.isFailure(dirResult)) {
-		return dirResult;
+	const dirResult: Awaited<ReturnType<typeof ensureConfigDir>> = await ensureConfigDir();
+	if (!Result.isSuccess(dirResult)) {
+		return Result.fail(dirResult.error);
 	}
 
 	try {
@@ -101,9 +105,9 @@ export async function loadSyncSettings(): Promise<Result<SyncSettings, Error>> {
  * Saves sync settings to disk
  */
 export async function saveSyncSettings(settings: SyncSettings): Promise<Result<void, Error>> {
-	const dirResult: Result<void, Error> = await ensureConfigDir();
-	if (Result.isFailure(dirResult)) {
-		return dirResult;
+	const dirResult = await ensureConfigDir();
+	if (!Result.isSuccess(dirResult)) {
+		return Result.fail(dirResult.error);
 	}
 
 	try {
@@ -120,19 +124,19 @@ export async function saveSyncSettings(settings: SyncSettings): Promise<Result<v
  * Loads complete sync configuration (Firebase + settings)
  */
 export async function loadSyncConfig(): Promise<Result<{ firebase: FirebaseConfig; sync: SyncSettings }, Error>> {
-	const firebaseResult: Result<FirebaseConfig, Error> = await loadFirebaseConfig();
-	if (Result.isFailure(firebaseResult)) {
-		return firebaseResult;
+	const firebaseResult = await loadFirebaseConfig();
+	if (!Result.isSuccess(firebaseResult)) {
+		return Result.fail(firebaseResult.error);
 	}
 
-	const settingsResult: Result<SyncSettings, Error> = await loadSyncSettings();
-	if (Result.isFailure(settingsResult)) {
-		return settingsResult;
+	const settingsResult = await loadSyncSettings();
+	if (!Result.isSuccess(settingsResult)) {
+		return Result.fail(settingsResult.error);
 	}
 
 	return Result.succeed({
-		firebase: (firebaseResult as { value: FirebaseConfig }).value,
-		sync: (settingsResult as { value: SyncSettings }).value,
+		firebase: firebaseResult.value,
+		sync: settingsResult.value,
 	});
 }
 
@@ -156,20 +160,74 @@ export async function isSyncEnabled(): Promise<boolean> {
  * Updates sync settings with partial data
  */
 export async function updateSyncSettings(updates: Partial<SyncSettings>): Promise<Result<void, Error>> {
-	const currentResult: Result<SyncSettings, Error> = await loadSyncSettings();
-	if (Result.isFailure(currentResult)) {
-		return currentResult;
+	const currentResult = await loadSyncSettings();
+	if (!Result.isSuccess(currentResult)) {
+		return Result.fail(currentResult.error);
 	}
 
-	const updated = { ...(currentResult as { value: SyncSettings }).value, ...updates };
+	const updated = { ...currentResult.value, ...updates };
 	return saveSyncSettings(updated);
+}
+
+/**
+ * Loads security configuration from disk
+ */
+export async function loadSecurityConfig(): Promise<Result<SecurityConfig, Error>> {
+	try {
+		const data = await readFile(getSecurityConfigPath(), 'utf-8');
+		const parsed = JSON.parse(data) as unknown;
+		const validated = securityConfigSchema.parse(parsed);
+		return Result.succeed(validated);
+	}
+	catch (error) {
+		// If file doesn't exist, return default config
+		if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
+			const defaultConfig = securityConfigSchema.parse({});
+			return Result.succeed(defaultConfig);
+		}
+		return Result.fail(error instanceof Error ? error : new Error(String(error)));
+	}
+}
+
+/**
+ * Saves security configuration to disk
+ */
+export async function saveSecurityConfig(config: SecurityConfig): Promise<Result<void, Error>> {
+	const ensureResult = await ensureConfigDir();
+	if (!Result.isSuccess(ensureResult)) {
+		return Result.fail(ensureResult.error);
+	}
+
+	try {
+		const validated = securityConfigSchema.parse(config);
+		await writeFile(getSecurityConfigPath(), JSON.stringify(validated, null, 2));
+		return Result.succeed(undefined);
+	}
+	catch (error) {
+		return Result.fail(error instanceof Error ? error : new Error(String(error)));
+	}
+}
+
+/**
+ * Updates security settings with partial data
+ */
+export async function updateSecurityConfig(updates: Partial<SecurityConfig>): Promise<Result<void, Error>> {
+	const currentResult = await loadSecurityConfig();
+	if (!Result.isSuccess(currentResult)) {
+		return Result.fail(currentResult.error);
+	}
+
+	const updated = { ...currentResult.value, ...updates };
+	return saveSecurityConfig(updated);
 }
 
 if (import.meta.vitest != null) {
 	const { describe, it, expect, beforeEach, afterEach } = import.meta.vitest;
-	const { mkdtemp, rm } = await import('node:fs/promises');
+	// eslint-disable-next-line antfu/no-top-level-await
+	const { mkdtemp } = await import('node:fs/promises');
+	// eslint-disable-next-line antfu/no-top-level-await
 	const { tmpdir } = await import('node:os');
-	// eslint-disable-next-line ts/unbound-method
+	// eslint-disable-next-line ts/unbound-method, antfu/no-top-level-await
 	const { join: joinPath } = await import('node:path');
 
 	describe('config-manager', () => {
@@ -201,31 +259,31 @@ if (import.meta.vitest != null) {
 			};
 
 			it('should save and load Firebase config', async () => {
-				const saveResult: Result<void, Error> = await saveFirebaseConfig(testConfig);
+				const saveResult = await saveFirebaseConfig(testConfig);
 				expect(Result.isSuccess(saveResult)).toBe(true);
 
-				const loadResult: Result<FirebaseConfig, Error> = await loadFirebaseConfig();
+				const loadResult = await loadFirebaseConfig();
 				expect(Result.isSuccess(loadResult)).toBe(true);
 				if (Result.isSuccess(loadResult)) {
-					expect((loadResult as { value: FirebaseConfig }).value).toEqual(testConfig);
+					expect(loadResult.value).toEqual(testConfig);
 				}
 			});
 
 			it('should return error when config not found', async () => {
-				const result: Result<FirebaseConfig, Error> = await loadFirebaseConfig();
+				const result = await loadFirebaseConfig();
 				expect(Result.isFailure(result)).toBe(true);
 				if (Result.isFailure(result)) {
-					expect((result as { error: Error }).error.message).toContain('Firebase config not found');
+					expect(result.error.message).toContain('Firebase config not found');
 				}
 			});
 		});
 
 		describe('Sync settings', () => {
 			it('should return default settings when file not found', async () => {
-				const result: Result<SyncSettings, Error> = await loadSyncSettings();
+				const result = await loadSyncSettings();
 				expect(Result.isSuccess(result)).toBe(true);
 				if (Result.isSuccess(result)) {
-					const settings = (result as { value: SyncSettings }).value;
+					const settings = result.value;
 					expect(settings.enabled).toBe(false);
 					expect(settings.retentionDays).toBe(365);
 				}
@@ -239,13 +297,13 @@ if (import.meta.vitest != null) {
 					retentionDays: 180,
 				};
 
-				const saveResult: Result<void, Error> = await saveSyncSettings(settings);
+				const saveResult = await saveSyncSettings(settings);
 				expect(Result.isSuccess(saveResult)).toBe(true);
 
-				const loadResult: Result<SyncSettings, Error> = await loadSyncSettings();
+				const loadResult = await loadSyncSettings();
 				expect(Result.isSuccess(loadResult)).toBe(true);
 				if (Result.isSuccess(loadResult)) {
-					expect((loadResult as { value: SyncSettings }).value).toEqual(settings);
+					expect(loadResult.value).toEqual(settings);
 				}
 			});
 
@@ -256,13 +314,13 @@ if (import.meta.vitest != null) {
 				};
 				await saveSyncSettings(initial);
 
-				const updateResult: Result<void, Error> = await updateSyncSettings({ enabled: true });
+				const updateResult = await updateSyncSettings({ enabled: true });
 				expect(Result.isSuccess(updateResult)).toBe(true);
 
-				const loadResult: Result<SyncSettings, Error> = await loadSyncSettings();
+				const loadResult = await loadSyncSettings();
 				expect(Result.isSuccess(loadResult)).toBe(true);
 				if (Result.isSuccess(loadResult)) {
-					const settings = (loadResult as { value: SyncSettings }).value;
+					const settings = loadResult.value;
 					expect(settings.enabled).toBe(true);
 					expect(settings.retentionDays).toBe(365);
 				}

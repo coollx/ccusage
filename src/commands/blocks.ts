@@ -13,6 +13,7 @@ import {
 import { sharedCommandConfig } from '../_shared-args.ts';
 import { getTotalTokens } from '../_token-utils.ts';
 import { formatCurrency, formatModelsDisplayMultiline, formatNumber, ResponsiveTable } from '../_utils.ts';
+import { determineDataSource, formatDataSource } from '../cloud-sync/cloud-indicator.ts';
 import { getCommandExecutor } from '../cloud-sync/command-executor.ts';
 import { getClaudePaths, loadSessionBlockData } from '../data-loader.ts';
 import { log, logger } from '../logger.ts';
@@ -141,6 +142,16 @@ export const blocksCommand = define({
 			description: `Refresh interval in seconds for live mode (default: ${DEFAULT_REFRESH_INTERVAL_SECONDS})`,
 			default: DEFAULT_REFRESH_INTERVAL_SECONDS,
 		},
+		cloud: {
+			type: 'boolean',
+			description: 'Show aggregated data from all devices (cloud sync)',
+			default: false,
+		},
+		local: {
+			type: 'boolean',
+			description: 'Force local-only mode (no cloud data)',
+			default: false,
+		},
 	},
 	toKebab: true,
 	async run(ctx) {
@@ -154,6 +165,15 @@ export const blocksCommand = define({
 		return executeFn('blocks', ctx.values, async (syncIndicator) => {
 			if (ctx.values.json) {
 				logger.level = 0;
+			}
+
+			// Determine data source based on flags
+			const dataSource = determineDataSource({ cloud: ctx.values.cloud, local: ctx.values.local });
+
+			if (dataSource === 'cloud' && !ctx.values.local) {
+				// TODO: Load cloud data when cloud sync is available
+				// For now, fall back to local data
+				logger.warn('Cloud sync not yet fully implemented, showing local data');
 			}
 
 			// Validate session length
@@ -311,7 +331,8 @@ export const blocksCommand = define({
 					const burnRate = calculateBurnRate(block);
 					const projection = projectBlockUsage(block);
 
-					logger.box('Current Session Block Status');
+					const activeHeaderText = `Current Session Block Status ${formatDataSource(dataSource)}`;
+					logger.box(activeHeaderText);
 
 					const now = new Date();
 					const elapsed = Math.round(
@@ -364,7 +385,8 @@ export const blocksCommand = define({
 				}
 				else {
 				// Table view for multiple blocks
-					logger.box('Claude Code Token Usage Report - Session Blocks');
+					const headerText = `Claude Code Token Usage Report - Session Blocks ${formatDataSource(dataSource)}`;
+					logger.box(headerText);
 
 					// Calculate token limit if "max" is specified
 					const actualTokenLimit = parseTokenLimit(ctx.values.tokenLimit, maxTokensFromAll);

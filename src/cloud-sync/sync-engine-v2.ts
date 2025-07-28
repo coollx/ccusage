@@ -19,7 +19,7 @@ import {
 	createISOTimestamp,
 
 } from '../_types.ts';
-import { loadUsageData } from '../data-loader.ts';
+import { loadDailyUsageData } from '../data-loader.ts';
 import { logger } from '../logger.ts';
 import { getCloudAggregator } from './aggregation.ts';
 import { loadSyncSettings, updateSyncSettings } from './config-manager.ts';
@@ -99,7 +99,7 @@ export class EnhancedSyncEngine {
 		// Load deduplication store
 		const deduplicationResult = await this.loadDeduplicationStore();
 		if (Result.isFailure(deduplicationResult)) {
-			logger.warn('Failed to load deduplication store:', deduplicationResult.value.message);
+			logger.warn('Failed to load deduplication store:', (deduplicationResult as { error: Error }).error.message);
 			// Continue anyway - we'll build it as we go
 		}
 
@@ -179,16 +179,14 @@ export class EnhancedSyncEngine {
 		if (!this.userId || !this.deviceName || !this.deviceId || !this.deduplicator) {
 			const initResult = await this.initialize();
 			if (Result.isFailure(initResult)) {
-				return { success: false, error: initResult.value.message };
+				return { success: false, error: (initResult as { error: Error }).error.message };
 			}
 		}
 
 		try {
 			// Load raw usage data for deduplication
-			const rawData = await loadUsageData({
+			const rawData = await loadDailyUsageData({
 				mode: 'auto',
-				order: 'asc',
-				offline: true,
 			});
 
 			if (rawData.length === 0) {
@@ -223,7 +221,7 @@ export class EnhancedSyncEngine {
 			if (Result.isFailure(deduplicationResult)) {
 				return {
 					success: false,
-					error: `Deduplication failed: ${deduplicationResult.value.message}`,
+					error: `Deduplication failed: ${(deduplicationResult as { error: Error }).error.message}`,
 					duration: Date.now() - startTime,
 				};
 			}

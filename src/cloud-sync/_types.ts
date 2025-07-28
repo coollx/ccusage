@@ -35,11 +35,28 @@ export const syncSettingsSchema = z.object({
 	enabled: z.boolean().default(false),
 	deviceName: z.string().optional(),
 	deviceId: z.string().uuid().optional(),
+	userId: z.string().optional(),
 	retentionDays: z.number().min(1).max(365).default(365),
 	lastSync: z.string().optional(),
 });
 
 export type SyncSettings = z.infer<typeof syncSettingsSchema>;
+
+/**
+ * Security configuration schema
+ */
+export const securityConfigSchema = z.object({
+	encryptionEnabled: z.boolean().default(true),
+	encryptedFields: z.object({
+		deviceUsage: z.array(z.string()).default([]),
+		sessionUsage: z.array(z.string()).default(['projectId', 'sessionId']),
+		aggregatedUsage: z.array(z.string()).default([]),
+	}).default({}),
+	keyRotationDays: z.number().min(30).max(365).default(90),
+	lastKeyRotation: z.string().optional(),
+});
+
+export type SecurityConfig = z.infer<typeof securityConfigSchema>;
 
 /**
  * Sync configuration schema (combines Firebase config and sync settings)

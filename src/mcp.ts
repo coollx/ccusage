@@ -410,7 +410,6 @@ export function createMcpHttpApp(options: LoadOptions = defaultOptions): Hono {
 }
 
 if (import.meta.vitest != null) {
-	/* eslint-disable ts/no-unsafe-assignment, ts/no-unsafe-member-access, ts/no-unsafe-call */
 	describe('MCP Server', () => {
 		describe('createMcpServer', () => {
 			it('should create MCP server with default options', () => {

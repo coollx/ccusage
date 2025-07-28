@@ -36,15 +36,9 @@ function log(message, color = 'reset') {
 const FIRESTORE_RULES = `rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Only authenticated users can read/write their own data
-    match /users/{userId}/{document=**} {
-      allow read, write: if request.auth != null 
-        && request.auth.uid == userId;
-    }
-    
-    // No other access is allowed
+    // Allow authenticated users full access to everything
     match /{document=**} {
-      allow read, write: if false;
+      allow read, write: if request.auth != null;
     }
   }
 }`;
@@ -84,12 +78,12 @@ async function main() {
 		log('   Create these indexes in your Firebase Console:', 'gray');
 		log(`   https://console.firebase.google.com/project/${config.projectId}/firestore/indexes\n`, 'gray');
 
-		log('   Index 1: Collection "usage" (within users/*/devices/*)', 'gray');
+		log('   Index 1: Collection "usage" (within devices/*)', 'gray');
 		log('   - Field: date (Ascending)', 'gray');
 		log('   - Field: lastUpdated (Descending)', 'gray');
 		log('');
 
-		log('   Index 2: Collection "devices" (within users/*)', 'gray');
+		log('   Index 2: Collection "devices"', 'gray');
 		log('   - Field: createdAt (Descending)', 'gray');
 		log('');
 

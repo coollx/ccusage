@@ -745,11 +745,11 @@ if (import.meta.vitest != null) {
 				};
 
 				// Save to cache
-				// eslint-disable-next-line ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				(aggregator as any).saveToCache('daily:2025-01-01', mockUsage, 5000);
 
 				// Retrieve from cache
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const cached = (aggregator as any).getFromCache('daily:2025-01-01');
 				expect(cached).toEqual(mockUsage);
 			});
@@ -768,23 +768,23 @@ if (import.meta.vitest != null) {
 				};
 
 				// Save with 1ms TTL
-				// eslint-disable-next-line ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				(aggregator as any).saveToCache('daily:2025-01-01', mockUsage, 1);
 
 				// Wait for expiration
 				await new Promise(resolve => setTimeout(resolve, 10));
 
 				// Should be expired
-				// eslint-disable-next-line ts/no-unsafe-assignment, ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const cached = (aggregator as any).getFromCache('daily:2025-01-01');
 				expect(cached).toBeNull();
 			});
 
 			it('should provide cache statistics', () => {
 				// Add some cache entries
-				// eslint-disable-next-line ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				(aggregator as any).saveToCache('test1', { data: 'test1' }, 5000);
-				// eslint-disable-next-line ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				(aggregator as any).saveToCache('test2', { data: 'test2' }, 5000);
 
 				const stats = aggregator.getCacheStats();
@@ -846,7 +846,7 @@ if (import.meta.vitest != null) {
 
 				// Access private method for testing
 				const aggregatorAny = aggregator as any;
-				// eslint-disable-next-line ts/no-unsafe-call, ts/no-unsafe-member-access
+
 				const monthly = aggregatorAny.combineDailyToMonthly(
 					dailyData,
 					createMonthlyDate('2025-01'),
